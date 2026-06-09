@@ -197,11 +197,11 @@ jobs:
             exit 1
           }
           echo "Found: $FILE"
-          grep -q 'onlineMode =' "$FILE" || {
+          grep -q 'onlineMode = this.get' "$FILE" || {
             echo "onlineMode assignment not found"
             exit 1
           }
-          sed -i 's/onlineMode = .*/onlineMode = false;/' "$FILE"
+          sed -i 's/public final boolean onlineMode = this.get("online-mode", false);/public final boolean onlineMode = false;/' "$FILE"
           echo '--- patched ---'
           grep -n 'onlineMode' "$FILE" | head -20
 
