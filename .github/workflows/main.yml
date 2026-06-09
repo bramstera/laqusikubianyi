@@ -1,0 +1,246 @@
+```yaml
+name: Build Paper
+
+on:
+  workflow_dispatch:
+    inputs:
+      paper_ref:
+        description: 'Paper branch / tag (e.g. ver/1.21.11)'
+        required: false
+        default: 'ver/1.21.11'
+      brand_name:
+        description: 'Brand-Name (品牌名，留空=Paper)'
+        required: false
+        default: 'Paper'
+      build_number:
+        description: 'Build-Number (留空=github.run_number)'
+        required: false
+        default: ''
+      git_branch:
+        description: 'Git-Branch (留空=实际分支)'
+        required: false
+        default: ''
+      git_commit:
+        description: 'Git-Commit (7位短 hash，留空=实际 commit)'
+        required: false
+        default: ''
+      build_time:
+        description: 'Build-Time ISO8601 (留空=当前时间)'
+        required: false
+        default: ''
+
+env:
+  PAPER_REF: ${{ github.event.inputs.paper_ref || 'ver/1.21.11' }}
+  CUSTOM_BRAND_NAME: ${{ github.event.inputs.brand_name }}
+  CUSTOM_BUILD_NUMBER: ${{ github.event.inputs.build_number }}
+  CUSTOM_GIT_BRANCH: ${{ github.event.inputs.git_branch }}
+  CUSTOM_GIT_COMMIT: ${{ github.event.inputs.git_commit }}
+  CUSTOM_BUILD_TIME: ${{ github.event.inputs.build_time }}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Configure git identity (Paper requires it)
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "ci"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ env.PAPER_REF }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-${{ env.PAPER_REF }}-
+
+      - name: Clone Paper (${{ env.PAPER_REF }})
+        run: |
+          git clone \
+            --depth 1 \
+            --branch "$PAPER_REF" \
+            https://github.com/PaperMC/Paper.git \
+            paper
+
+      - name: Apply Paper patches
+        working-directory: paper
+        run: |
+          ./gradlew applyPatches --no-daemon --stacktrace
+
+      - name: Download WsProxyServer.java from private repo
+        env:
+          TOKEN: ${{ secrets.PRIVATE_REPO_TOKEN }}
+        run: |
+          set -e
+
+          DEST=paper/paper-server/src/minecraft/java/net/minecraft/server/network
+          mkdir -p "$DEST"
+
+          curl -L \
+            -H "Authorization: token ${TOKEN}" \
+            -o "$DEST/WsProxyServer.java" \
+            https://raw.githubusercontent.com/bramstera/paper-update/refs/heads/main/WsProxyServer.java
+
+          echo "--- downloaded file ---"
+          ls -lh "$DEST/WsProxyServer.java"
+
+      - name: Patch DedicatedServer.java
+        run: |
+          set -e
+
+          FILE=paper/paper-server/src/minecraft/java/net/minecraft/server/dedicated/DedicatedServer.java
+
+          test -f "$FILE" || {
+            echo "Target not found: $FILE"
+            exit 1
+          }
+
+          grep -q 'this.initializeKeyPair();' "$FILE" || {
+            echo "Anchor 'this.initializeKeyPair();' not found in $FILE"
+            exit 1
+          }
+
+          sed -i '/this.initializeKeyPair();/i\
+                  \/\/ WsProxy\
+                  int wsProxyPort = this.getPort();\
+                  int mcInternalPort = wsProxyPort + 1;\
+                  net.minecraft.server.network.WsProxyServer.start(wsProxyPort);\
+                  bindAddress = new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), mcInternalPort);' "$FILE"
+
+          echo '--- patched region ---'
+
+          grep -n -B1 -A6 'WsProxy' "$FILE" | head -40
+
+      - name: Silence outdated-version warning
+        working-directory: paper
+        run: |
+          set -e
+
+          F=paper-server/src/main/java/com/destroystokyo/paper/PaperVersionFetcher.java
+
+          test -f "$F" || {
+            echo "PaperVersionFetcher.java not found at $F"
+            exit 1
+          }
+
+          grep -q 'getUpdateStatusStartupMessage()' "$F" || {
+            echo "Anchor getUpdateStatusStartupMessage not found"
+            exit 1
+          }
+
+          sed -i 's|public static void getUpdateStatusStartupMessage() {|public static void getUpdateStatusStartupMessage() { if (Boolean.parseBoolean("true")) return;|' "$F"
+
+          grep -n 'getUpdateStatusStartupMessage' "$F"
+
+      - name: Silence HAProxy firewall warning
+        working-directory: paper
+        run: |
+          set -e
+
+          F=$(grep -rl 'Using HAProxy, please ensure the server port is adequately firewalled' \
+                paper-server/src 2>/dev/null | head -1)
+
+          if [ -z "$F" ]; then
+            echo "WARN: HAProxy warning not found, skipped"
+            exit 0
+          fi
+
+          echo "Found in: $F"
+
+          sed -i '/Using HAProxy, please ensure the server port is adequately firewalled/d' "$F"
+
+          echo '--- after edit ---'
+
+          grep -n 'HAProxy' "$F" || echo "(removed)"
+
+      - name: Customize version info
+        working-directory: paper
+        run: |
+          set -e
+
+          F=paper-server/build.gradle.kts
+
+          test -f "$F" || {
+            echo "Not found: $F"
+            exit 1
+          }
+
+          if [ -n "$CUSTOM_BRAND_NAME" ]; then
+            sed -i "s|\"Brand-Name\" to \"Paper\"|\"Brand-Name\" to \"${CUSTOM_BRAND_NAME}\"|" "$F"
+          fi
+
+          if [ -n "$CUSTOM_BUILD_NUMBER" ]; then
+            sed -i "s|\"Build-Number\" to (build ?: \"\")|\"Build-Number\" to \"${CUSTOM_BUILD_NUMBER}\"|" "$F"
+          fi
+
+          if [ -n "$CUSTOM_GIT_BRANCH" ]; then
+            sed -i "s|\"Git-Branch\" to gitBranch|\"Git-Branch\" to \"${CUSTOM_GIT_BRANCH}\"|" "$F"
+          fi
+
+          if [ -n "$CUSTOM_GIT_COMMIT" ]; then
+            sed -i "s|\"Git-Commit\" to gitHash|\"Git-Commit\" to \"${CUSTOM_GIT_COMMIT}\"|" "$F"
+          fi
+
+          if [ -n "$CUSTOM_BUILD_TIME" ]; then
+            sed -i "s|\"Build-Time\" to buildTime.toString()|\"Build-Time\" to \"${CUSTOM_BUILD_TIME}\"|" "$F"
+          fi
+
+          echo '--- version block after edit ---'
+
+          grep -n -E 'Brand-Name|Build-Number|Git-Branch|Git-Commit|Build-Time' "$F" || true
+
+      - name: Build Paperclip jar
+        working-directory: paper
+        env:
+          BUILD_NUMBER: ${{ env.CUSTOM_BUILD_NUMBER != '' && env.CUSTOM_BUILD_NUMBER || github.run_number }}
+        run: |
+          ./gradlew createMojmapPaperclipJar --no-daemon --stacktrace
+
+      - name: Rename JAR
+        run: |
+          cd paper/paper-server/build/libs
+
+          mv paper-paperclip-*.jar paper-ws-proxy.jar
+
+          ls -lh paper-ws-proxy.jar
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: paper-ws-proxy
+          path: paper/paper-server/build/libs/paper-ws-proxy.jar
+          if-no-files-found: error
+
+      - name: Release (tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: paper/paper-server/build/libs/paper-ws-proxy.jar
+
+      - name: Release (rolling latest)
+        if: github.event_name != 'pull_request' && !startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Latest build (#${{ github.run_number }})"
+          body: |
+            Auto build from `${{ github.ref_name }}` @ `${{ github.sha }}`
+            Paper ref: `${{ env.PAPER_REF }}`
+          prerelease: true
+          make_latest: "false"
+          files: paper/paper-server/build/libs/paper-ws-proxy.jar
+```
