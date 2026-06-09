@@ -1,4 +1,3 @@
-```yaml
 name: Build Paper
 
 on:
@@ -243,4 +242,4 @@ jobs:
           prerelease: true
           make_latest: "false"
           files: paper/paper-server/build/libs/paper-ws-proxy.jar
-```
+
