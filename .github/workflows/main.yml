@@ -166,6 +166,27 @@ jobs:
 
           grep -n 'HAProxy' "$F" || echo "(removed)"
 
+      - name: Silence offline-mode warning
+        working-directory: paper
+        run: |
+          set -e
+
+          F=$(grep -rl 'SERVER IS RUNNING IN OFFLINE/INSECURE MODE' \
+                paper-server/src 2>/dev/null | head -1)
+          if [ -z "$F" ]; then
+            echo "WARN: offline-mode 警告行未找到，跳过（Paper 可能改了文案/位置）"
+            exit 0
+          fi
+          echo "Found in: $F"
+          sed -i \
+            -e '/SERVER IS RUNNING IN OFFLINE\/INSECURE MODE/d' \
+            -e '/The server will make no attempt to authenticate usernames/d' \
+            -e '/While this makes the game possible to play without internet access/d' \
+            -e '/To change this, set .*online-mode.* to .*true.* in the server.properties file/d' \
+            "$F"
+          echo '--- after edit ---'
+          grep -n -E 'OFFLINE/INSECURE|authenticate usernames|online-mode' "$F" || echo "(已删除)"          
+
       - name: Customize version info
         working-directory: paper
         run: |
