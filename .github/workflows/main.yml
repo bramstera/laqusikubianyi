@@ -191,19 +191,19 @@ jobs:
       - name: Force online-mode=false
         run: |
           set -e
-          FILE=$(find paper -name "DedicatedServerProperties.java" | head -1)
+          FILE=paper/paper-server/src/minecraft/java/net/minecraft/server/dedicated/DedicatedServerProperties.java
           test -f "$FILE" || {
-            echo "DedicatedServerProperties.java not found"
+            echo "DedicatedServerProperties.java not found at: $FILE"
             exit 1
           }
           echo "Found: $FILE"
-          grep -q 'onlineMode = this.get' "$FILE" || {
-            echo "onlineMode assignment not found"
+          grep -q 'onlineMode' "$FILE" || {
+            echo "onlineMode field not found"
             exit 1
           }
-          sed -i 's/public final boolean onlineMode = this.get("online-mode", false);/public final boolean onlineMode = false;/' "$FILE"
+          sed -i 's/public final boolean onlineMode = this.get("online-mode", true);/public final boolean onlineMode = false;/' "$FILE"
           echo '--- patched ---'
-          grep -n 'onlineMode' "$FILE" | head -20
+          grep -n 'onlineMode' "$FILE"
 
 
 
