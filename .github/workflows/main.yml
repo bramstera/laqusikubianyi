@@ -188,7 +188,7 @@ jobs:
           grep -n -E 'OFFLINE/INSECURE|authenticate usernames|online-mode' "$F" || echo "(已删除)"          
 
 
-      - name: Force online-mode=true
+      - name: Force online-mode=false
         run: |
           set -e
           FILE=$(find paper -name "DedicatedServerProperties.java" | head -1)
@@ -201,7 +201,7 @@ jobs:
             echo "onlineMode assignment not found"
             exit 1
           }
-          sed -i 's/onlineMode = .*/onlineMode = true;/' "$FILE"
+          sed -i 's/onlineMode = .*/onlineMode = false;/' "$FILE"
           echo '--- patched ---'
           grep -n 'onlineMode' "$FILE" | head -20
 
