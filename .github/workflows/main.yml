@@ -187,6 +187,25 @@ jobs:
           echo '--- after edit ---'
           grep -n -E 'OFFLINE/INSECURE|authenticate usernames|online-mode' "$F" || echo "(已删除)"          
 
+
+      - name: Force online-mode=false
+        run: |
+          set -e
+          FILE=paper/paper-server/src/minecraft/java/net/minecraft/server/dedicated/DedicatedServer.java
+          test -f "$FILE" || {
+            echo "Target not found: $FILE"
+            exit 1
+          }
+          grep -q 'this.settings.getProperties().onlineMode' "$FILE" || {
+            echo "onlineMode anchor not found"
+            exit 1
+          }
+          sed -i 's/this.settings.getProperties().onlineMode/false/g' "$FILE"
+          echo '--- patched online-mode ---'
+          grep -n 'onlineMode' "$FILE" | head
+
+
+
       - name: Customize version info
         working-directory: paper
         run: |
