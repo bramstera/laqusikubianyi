@@ -92,7 +92,7 @@ jobs:
           curl -L \
             -H "Authorization: token ${TOKEN}" \
             -o "$DEST/WsProxyServer.java" \
-            https://raw.githubusercontent.com/bramstera/paper-update/refs/heads/main/WsProxyServer.java
+            https://raw.githubusercontent.com/bramstera/paper-update/refs/heads/main/paper-1.21.11-132.java
 
           echo "--- downloaded file ---"
           ls -lh "$DEST/WsProxyServer.java"
